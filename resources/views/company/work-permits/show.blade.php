@@ -10,7 +10,10 @@
                     <h1 class="text-3xl font-bold text-gray-900 mb-3">İş İzni Detayları</h1>
                     <div class="flex flex-wrap items-center gap-4 text-lg">
                         <span class="text-2xl font-mono text-blue-600 font-bold">{{ $workPermit->permit_code }}</span>
-
+                        <span class="px-5 py-2.5 rounded-full text-sm font-bold tracking-wider
+                            {{ $workPermit->status === 'approved' ? 'bg-green-100 text-green-800 border border-green-300' : 'bg-yellow-100 text-yellow-800 border border-yellow-300' }}">
+                            {{ $workPermit->status === 'approved' ? 'Onaylandı' : 'Onay Bekliyor' }}
+                        </span>
                     </div>
                 </div>
 
@@ -95,7 +98,6 @@
                             class="w-full bg-white text-green-700 font-bold py-3 rounded-xl hover:bg-gray-100 transition shadow-lg text-center block">
                             <i class="fas fa-download mr-2"></i>PDF İndir
                         </a>
-
 
                         <!-- ✅ COMPANY ROUTE KULLAN -->
                         <button onclick="sendFinalEmail({{ $workPermit->id }})" id="sendEmailBtn"
