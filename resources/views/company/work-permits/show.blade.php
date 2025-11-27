@@ -105,25 +105,6 @@
                     </div>
                 </div>
 
-                <!-- PDF Durumu -->
-                <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                    <h3 class="text-xl font-bold mb-4 text-gray-900">PDF Durumu</h3>
-                    <div class="space-y-3 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Durum:</span>
-                            <span class="font-semibold {{ $workPermit->final_pdf_path ? 'text-green-600' : 'text-yellow-600' }}">
-                                {{ $workPermit->final_pdf_path ? 'Oluşturuldu' : 'Oluşturulmadı' }}
-                            </span>
-                        </div>
-                        @if($workPermit->final_pdf_path)
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Dosya:</span>
-                            <span class="font-mono text-xs">{{ basename($workPermit->final_pdf_path) }}</span>
-                        </div>
-                        @endif
-                    </div>
-                </div>
-
                 <!-- Kurum Bilgileri -->
                 <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
                     <h3 class="text-xl font-bold mb-6 text-gray-900">Kurum Bilgileri</h3>
