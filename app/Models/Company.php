@@ -20,6 +20,7 @@ class Company extends Model
 
     protected $fillable = [
         'name',
+        'contact_person',
         'email',
         'phone',
         'address',
@@ -49,13 +50,13 @@ class Company extends Model
 
     public function departments()
     {
-        return $this->hasMany(CompanyDepartment::class, 'company_id');
+        return $this->hasMany(Department::class);
     }
 
     public function positions()
-{
-    return $this->hasMany(\App\Models\CompanyPosition::class);
-}
+    {
+        return $this->hasManyThrough(Position::class, Department::class);
+    }
 
 
     public function activeDepartments()

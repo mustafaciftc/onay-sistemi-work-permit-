@@ -1,34 +1,35 @@
 <?php
-
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Position extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
-        'company_id',
         'department_id',
         'name',
         'description',
         'is_active'
     ];
 
-    public function company()
+    protected $casts = [
+        'is_active' => 'boolean'
+    ];
+
+    public function department(): BelongsTo
     {
-        return $this->belongsTo(Company::class);
+        return $this->belongsTo(Department::class);
     }
 
-    public function department()
-    {
-        return $this->belongsTo(CompanyDepartment::class);
-    }
-
-    public function users()
+    public function users(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function workPermits(): HasMany
+    {
+        return $this->hasMany(WorkPermitForm::class);
     }
 }

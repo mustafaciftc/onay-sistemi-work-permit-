@@ -71,7 +71,7 @@
                 @php
                     $currentCompany = auth()->user()->currentCompany();
                     $departments = $currentCompany
-                        ? \App\Models\CompanyDepartment::where('company_id', $currentCompany->id)
+                        ? \App\Models\Department::where('company_id', $currentCompany->id)
                             ->where('is_active', true)
                             ->orderBy('name')
                             ->get()

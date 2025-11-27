@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\Role;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use App\Models\User;
 use App\Models\Company;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -44,6 +46,7 @@ class AuthController extends Controller
         return view('auth.register');
     }
 
+
     public function register(Request $request)
     {
         $validated = $request->validate([
@@ -52,42 +55,47 @@ class AuthController extends Controller
             'password' => 'required|min:8|confirmed',
             'company_name' => 'required|string|max:255',
             'company_email' => 'required|email',
-            'company_phone' => 'nullable|string',
-            'company_address' => 'nullable|string|max:500',
+            'company_phone' => 'nullable|string|max:20',
+            'address' => 'nullable|string|max:255',
         ]);
 
         $user = DB::transaction(function () use ($validated) {
-
             // Şirket oluştur
             $company = Company::create([
                 'name' => $validated['company_name'],
                 'email' => $validated['company_email'],
-                'phone' => $validated['company_phone'],
-                'address' => $validated['company_address'] ?? null,
+                'phone' => $validated['company_phone'] ?? null,
+                'address' => $validated['address'] ?? null,
                 'is_active' => true,
             ]);
 
-            // Kullanıcı oluşturuyoruz
+            // ✅ İLK KULLANICI CALISAN OLACAK!
             $user = User::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
-                'role' => 'admin',   // ENUM rol atanıyor
-                'company_id' => $company->id, // basit ilişki
+                'company_email' => $validated['company_email'],
+                'company_phone' => $validated['company_phone'] ?? null,
+                'address' => $validated['address'] ?? null,
+                'role' => Role::CALISAN,
+                'company_id' => $company->id,
             ]);
 
             return $user;
         });
 
         Auth::login($user);
-
-        return $this->redirectByRole($user);
+        return redirect()->route('company.calisan'); // ✅ Çalışan paneline
     }
 
     private function redirectByRole($user)
     {
         if ($user->isAdmin()) {
             return redirect()->route('admin.dashboard');
+        }
+
+         if ($user->isCalisan()) {
+            return redirect()->route('company.calisan');
         }
 
         if ($user->isBirimAmiri()) {

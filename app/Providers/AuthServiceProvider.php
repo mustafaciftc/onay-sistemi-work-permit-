@@ -2,7 +2,7 @@
 
 namespace App\Providers;
 
-use App\Models\CompanyDepartment;
+use App\Models\Department;
 use App\Models\WorkPermitForm;
 use App\Policies\DepartmentPolicy;
 use App\Policies\WorkPermitPolicy;
@@ -11,7 +11,7 @@ use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvid
 class AuthServiceProvider extends ServiceProvider
 {
     protected $policies = [
-        CompanyDepartment::class => DepartmentPolicy::class,
+        Department::class => DepartmentPolicy::class,
         WorkPermitForm::class => WorkPermitPolicy::class,
     ];
 

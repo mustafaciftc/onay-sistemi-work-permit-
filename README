@@ -185,7 +185,7 @@ onay-sistemi/
 │   │   ├── WorkPermitForm.php          ✅ İş İznisi
 │   │   ├── WorkPermitApproval.php      ✅ Onay Loglari
 │   │   ├── Company.php                 ✅ Firma
-│   │   ├── CompanyDepartment.php       ✅ Departman
+│   │   ├── Department.php       ✅ Departman
 │   │   ├── User.php                    ✅ Kullanıcı
 │   │   └── ...
 │   ├── Http/Controllers/
@@ -352,7 +352,7 @@ Sistemin tam kurulumundan önce kontrol edin:
 ## 🛡️ GÜVENLIK
 
 - ✅ SQL Injection koruması
-- ✅ XSS koruması  
+- ✅ XSS koruması
 - ✅ CSRF token
 - ✅ Password hashing
 - ✅ Role-based access control
@@ -426,9 +426,9 @@ php artisan serve
 
 ---
 
-**Hazırlayan**: AI Code Assistant  
-**Versiyon**: 1.0  
-**Tarih**: 20.11.2025  
+**Hazırlayan**: AI Code Assistant
+**Versiyon**: 1.0
+**Tarih**: 20.11.2025
 **Durum**: ✅ Production Ready
 
 ---

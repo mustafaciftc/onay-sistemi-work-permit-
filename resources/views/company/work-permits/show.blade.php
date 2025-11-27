@@ -1,4 +1,4 @@
-@extends('admin.layout')
+@extends('layouts.app') {{-- ✅ Admin layout yerine normal layout --}}
 
 @section('content')
     <div class="max-w-7xl mx-auto px-4 py-8">
@@ -10,14 +10,13 @@
                     <h1 class="text-3xl font-bold text-gray-900 mb-3">İş İzni Detayları</h1>
                     <div class="flex flex-wrap items-center gap-4 text-lg">
                         <span class="text-2xl font-mono text-blue-600 font-bold">{{ $workPermit->permit_code }}</span>
-                        <span class="px-5 py-2.5 rounded-full text-sm font-bold tracking-wider bg-green-100 text-green-800 border border-green-300">
-                            Aktif - Çalışma Devam Ediyor
-                        </span>
+
                     </div>
                 </div>
 
                 <div class="flex gap-3">
-                    <a href="{{ route('admin.work-permits.index') }}"
+                    <!-- ✅ COMPANY ROUTE KULLAN -->
+                    <a href="{{ route('company.work-permits.index') }}"
                         class="px-5 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 flex items-center gap-2 shadow-md transition">
                         <i class="fas fa-arrow-left"></i>
                         <span>Geri Dön</span>
@@ -45,7 +44,7 @@
                         </div>
                         <div>
                             <p class="text-sm text-gray-500 mb-1">İş Türü</p>
-                            <p class="text-lg font-semibold capitalize">{{ str_replace('_', ' ', $workPermit->work_type) }}</p>
+                            <p class="text-lg font-semibold capitalize">{{ $workPermit->work_type }}</p>
                         </div>
                         <div>
                             <p class="text-sm text-gray-500 mb-1">Çalışan</p>
@@ -83,30 +82,47 @@
             <!-- Sağ Kolon -->
             <div class="space-y-8">
 
-                <!-- PDF ve Email Butonları - HER ZAMAN GÖSTER -->
+                <!-- PDF ve Email Butonları -->
                 <div class="bg-gradient-to-br from-green-600 to-blue-600 rounded-2xl shadow-2xl p-8 text-white">
                     <h3 class="text-2xl font-bold mb-4 flex items-center">
-                        <i class="fas fa-check-circle mr-3 text-2xl"></i>
-                        Tüm Onaylar Tamamlandı!
+                        <i class="fas fa-file-pdf mr-3 text-2xl"></i>
+                        PDF & Email İşlemleri
                     </h3>
-                    <p class="mb-6 opacity-90">İş izni başarıyla onaylandı.</p>
 
                     <div class="space-y-4">
-                        <!-- PDF İndir Butonu -->
-                        <a href="{{ route('admin.work-permits.final-pdf.download', $workPermit) }}"
+                        <!-- ✅ COMPANY ROUTE KULLAN -->
+                        <a href="{{ route('company.work-permits.final-pdf.download', $workPermit) }}"
                             class="w-full bg-white text-green-700 font-bold py-3 rounded-xl hover:bg-gray-100 transition shadow-lg text-center block">
-                            <i class="fas fa-file-pdf mr-2"></i>PDF İndir
+                            <i class="fas fa-download mr-2"></i>PDF İndir
                         </a>
 
-                        <!-- Email Gönder Butonu -->
-                        <button onclick="sendFinalEmail({{ $workPermit->id }})"
+
+                        <!-- ✅ COMPANY ROUTE KULLAN -->
+                        <button onclick="sendFinalEmail({{ $workPermit->id }})" id="sendEmailBtn"
                             class="w-full bg-white text-purple-700 font-bold py-3 rounded-xl hover:bg-gray-100 transition shadow-lg">
                             <i class="fas fa-paper-plane mr-2"></i>Email Gönder
                         </button>
-
                     </div>
                 </div>
 
+                <!-- PDF Durumu -->
+                <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                    <h3 class="text-xl font-bold mb-4 text-gray-900">PDF Durumu</h3>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Durum:</span>
+                            <span class="font-semibold {{ $workPermit->final_pdf_path ? 'text-green-600' : 'text-yellow-600' }}">
+                                {{ $workPermit->final_pdf_path ? 'Oluşturuldu' : 'Oluşturulmadı' }}
+                            </span>
+                        </div>
+                        @if($workPermit->final_pdf_path)
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Dosya:</span>
+                            <span class="font-mono text-xs">{{ basename($workPermit->final_pdf_path) }}</span>
+                        </div>
+                        @endif
+                    </div>
+                </div>
 
                 <!-- Kurum Bilgileri -->
                 <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
@@ -124,6 +140,9 @@
                         <div><span class="text-gray-500">Oluşturma:</span>
                             <strong>{{ $workPermit->created_at->format('d.m.Y H:i') }}</strong>
                         </div>
+                        <div><span class="text-gray-500">Durum:</span>
+                            <strong class="capitalize">{{ $workPermit->status }}</strong>
+                        </div>
                     </div>
                 </div>
 
@@ -134,12 +153,16 @@
     <script>
         function generateFinalPdf(workPermitId) {
             if (confirm('PDF yeniden oluşturulsun mu?')) {
-                const button = event.target;
+                const button = document.getElementById('generatePdfBtn');
                 const originalText = button.innerHTML;
                 button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Oluşturuluyor...';
                 button.disabled = true;
 
-                fetch(`/admin/work-permits/${workPermitId}/generate-final-pdf`, {
+                // ✅ COMPANY URL KULLAN
+                const url = `/company/work-permits/${workPermitId}/generate-final-pdf`;
+                console.log('🔗 İstek URL:', url);
+
+                fetch(url, {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': '{{ csrf_token() }}',
@@ -148,27 +171,36 @@
                     }
                 })
                 .then(response => {
-                    console.log('Response status:', response.status);
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            console.log('Response text:', text);
-                            throw new Error('HTTP error! status: ' + response.status);
-                        });
-                    }
-                    return response.json();
+                    console.log('📡 Response status:', response.status);
+
+                    return response.text().then(text => {
+                        console.log('📄 Response body:', text.substring(0, 500));
+
+                        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+                            throw new Error('Route bulunamadı - HTML sayfası döndü');
+                        }
+
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            throw new Error('JSON parse hatası: ' + e.message);
+                        }
+                    });
                 })
                 .then(data => {
-                    console.log('Success data:', data);
+                    console.log('✅ Success data:', data);
                     if (data.success) {
                         alert('✅ PDF başarıyla oluşturuldu!');
-                        window.location.reload();
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
                     } else {
-                        throw new Error(data.message);
+                        throw new Error(data.message || 'Bilinmeyen hata');
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('❌ Hata: ' + error.message);
+                    console.error('❌ Error:', error);
+                    alert('❌ Hata: ' + error.message + '\n\nURL: ' + url);
                     button.innerHTML = originalText;
                     button.disabled = false;
                 });
@@ -177,12 +209,16 @@
 
         function sendFinalEmail(workPermitId) {
             if (confirm('Onay emaili gönderilsin mi?')) {
-                const button = event.target;
+                const button = document.getElementById('sendEmailBtn');
                 const originalText = button.innerHTML;
                 button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Gönderiliyor...';
                 button.disabled = true;
 
-                fetch(`/admin/work-permits/${workPermitId}/send-final-email`, {
+                // ✅ COMPANY URL KULLAN
+                const url = `/company/work-permits/${workPermitId}/send-final-email`;
+                console.log('🔗 İstek URL:', url);
+
+                fetch(url, {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': '{{ csrf_token() }}',
@@ -191,17 +227,24 @@
                     }
                 })
                 .then(response => {
-                    console.log('Response status:', response.status);
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            console.log('Response text:', text);
-                            throw new Error('HTTP error! status: ' + response.status);
-                        });
-                    }
-                    return response.json();
+                    console.log('📡 Response status:', response.status);
+
+                    return response.text().then(text => {
+                        console.log('📄 Response body:', text.substring(0, 500));
+
+                        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+                            throw new Error('Route bulunamadı - HTML sayfası döndü');
+                        }
+
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            throw new Error('JSON parse hatası: ' + e.message);
+                        }
+                    });
                 })
                 .then(data => {
-                    console.log('Success data:', data);
+                    console.log('✅ Success data:', data);
                     if (data.success) {
                         alert('✅ Email başarıyla gönderildi!');
                         button.innerHTML = '<i class="fas fa-check mr-2"></i>Gönderildi';
@@ -210,21 +253,23 @@
                             button.disabled = false;
                         }, 3000);
                     } else {
-                        throw new Error(data.message);
+                        throw new Error(data.message || 'Bilinmeyen hata');
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('❌ Hata: ' + error.message);
+                    console.error('❌ Error:', error);
+                    alert('❌ Hata: ' + error.message + '\n\nURL: ' + url);
                     button.innerHTML = originalText;
                     button.disabled = false;
                 });
             }
         }
 
-        // Debug için konsol bilgisi
-        console.log('PDF Durumu:');
-        console.log('- PDF Path:', '{{ $workPermit->final_pdf_path }}');
-        console.log('- PDF Exists:', {{ $workPermit->final_pdf_path && Storage::exists($workPermit->final_pdf_path) ? 'true' : 'false' }});
+        // Debug için
+        console.log('🔧 Debug Bilgileri:');
+        console.log('- WorkPermit ID:', {{ $workPermit->id }});
+        console.log('- Status:', '{{ $workPermit->status }}');
+        console.log('- Final PDF Path:', '{{ $workPermit->final_pdf_path }}');
+        console.log('- User Role:', '{{ Auth::user()->role }}');
     </script>
 @endsection

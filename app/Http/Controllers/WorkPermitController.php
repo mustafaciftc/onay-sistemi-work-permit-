@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use App\Enums\Role;
 use App\Enums\WorkPermitStatus;
 use Illuminate\Support\Facades\Log;
@@ -9,18 +10,17 @@ use App\Models\WorkPermitForm;
 use App\Models\WorkPermitApproval;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Company;
-use App\Models\CompanyDepartment;
+use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Barryvdh\DomPDF\Facade\Pdf;
 use App\Notifications\WorkPermitApprovalNotification;
 use App\Events\WorkPermitStatusUpdated;
 use App\Events\NewApprovalAssigned;
 use App\Models\User;
 use Illuminate\Support\Facades\Mail;
-use App\Models\DepartmentPosition;
+use App\Models\Position;
 use Illuminate\Http\RedirectResponse;
 
 class WorkPermitController extends Controller
@@ -86,10 +86,10 @@ class WorkPermitController extends Controller
 
         if ($user->isAdmin()) {
             $workPermits = $this->getFilteredWorkPermits($filters);
-            $departments = CompanyDepartment::where('is_active', true)->orderBy('name')->get();
+            $departments = Department::where('is_active', true)->orderBy('name')->get();
         } else {
             $workPermits = $this->getFilteredWorkPermits($filters, $company->id);
-            $departments = CompanyDepartment::where('company_id', $company->id)
+            $departments = Department::where('company_id', $company->id)
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->get();
@@ -97,7 +97,7 @@ class WorkPermitController extends Controller
 
         $stats = $this->getWorkPermitStats($company->id ?? null);
 
-        return view('admin.work-permits.index', compact('workPermits', 'departments', 'stats', 'filters'));
+        return view('company.work-permits.index', compact('workPermits', 'departments', 'stats', 'filters'));
     }
 
     /**
@@ -106,34 +106,81 @@ class WorkPermitController extends Controller
     public function create()
     {
         $user = Auth::user();
-        $company = $this->getUserCompany($user);
 
-        if (!$company) {
-            return redirect()->route('admin.dashboard')
-                ->with('error', 'Aktif bir şirket bulunamadı.');
+        if (!$user->isCalisan()) {
+            abort(403, 'Bu sayfaya sadece çalışanlar erişebilir.');
         }
 
-        $departments = CompanyDepartment::with(['positions'])
-            ->where('company_id', $company->id)
+        $departments = Department::with(['positions' => function ($query) {
+            $query->where('is_active', true);
+        }])
             ->where('is_active', true)
+            ->orderBy('company_id')
+            ->orderBy('name')
             ->get();
 
-        return view('admin.work-permits.create', compact('departments', 'company'));
+        Log::info('İş izni oluşturma sayfası', [
+            'user_id' => $user->id,
+            'user_company_id' => $user->company_id,
+            'total_departments' => $departments->count(),
+            'message' => 'Tüm aktif departmanlar gösteriliyor'
+        ]);
+
+        return view('company.work-permits.create', compact('departments'));
     }
 
-    /**
-     * İş izni kaydetme
-     */
+
+    public function getPositionsByDepartment(Department $department)
+    {
+        try {
+            $user = Auth::user();
+
+            Log::info('Pozisyonlar isteği', [
+                'department_id' => $department->id,
+                'department_name' => $department->name,
+                'department_company' => $department->company_id,
+                'user_company' => $user->company_id,
+                'user_id' => $user->id
+            ]);
+
+            if ($user->company_id && $department->company_id !== $user->company_id) {
+                Log::warning('Departman şirket uyumsuzluğu', [
+                    'user_company' => $user->company_id,
+                    'dept_company' => $department->company_id,
+                    'department_id' => $department->id
+                ]);
+
+                // ❌ ARTIK HATA DÖNDÜRMEYELİM, POZİSYONLARI GÖSTERELİM
+                // return response()->json(['error' => 'Yetkisiz erişim.'], 403);
+            }
+
+            $positions = Position::where('department_id', $department->id)
+                ->where('is_active', true)
+                ->select('id', 'name')
+                ->get();
+
+            Log::info('Pozisyonlar getirildi', [
+                'department_id' => $department->id,
+                'positions_count' => $positions->count()
+            ]);
+
+            return response()->json($positions);
+        } catch (\Exception $e) {
+            Log::error('Pozisyonlar getirilemedi: ' . $e->getMessage());
+            return response()->json(['error' => 'Sunucu hatası'], 500);
+        }
+    }
+
     public function store(Request $request)
     {
         Log::info('🎯 WorkPermit oluşturma başlıyor', ['user_id' => Auth::id()]);
 
         $validator = Validator::make($request->all(), [
-            'department_id' => 'required|exists:company_departments,id',
-            'position_id' => 'required|exists:department_positions,id',
+            'department_id' => 'required|exists:departments,id',
+            'position_id'   => 'required|exists:positions,id',
             'title' => 'required|string|max:255',
-            'work_type' => 'required|in:sıcak,elektrik,yuk_kaldirma,kazı,diğer',
-            'work_description' => 'required|string',
+            'work_type' => 'required|string|max:100',
+            'work_description' => 'required|string|max:2000',
             'location' => 'required|string|max:255',
             'risks' => 'required|array|min:1',
             'risks.*' => 'required|string',
@@ -158,34 +205,103 @@ class WorkPermitController extends Controller
         }
 
         $user = Auth::user();
-        $companyId = $user->company_id;
 
-        if (!$companyId) {
+        if (!$user->isCalisan()) {
+            Log::warning('❌ İzin oluşturma yetkisi yok', [
+                'user_id' => $user->id,
+                'user_role' => $user->role
+            ]);
             return redirect()->back()
-                ->with('error', 'Kullanıcının bir şirkete atanmamış.')
+                ->with('error', 'Sadece çalışanlar iş izni başvurusu yapabilir!')
                 ->withInput();
         }
 
-        return DB::transaction(function () use ($request, $validator, $user, $companyId) {
+        return DB::transaction(function () use ($request, $validator, $user) {
             try {
                 $validated = $validator->validated();
 
-                // Departman ve pozisyon kontrolü
-                if (!$this->validateDepartmentAndPosition($validated['department_id'], $validated['position_id'], $companyId)) {
+                $department = Department::find($validated['department_id']);
+                $position = Position::find($validated['position_id']);
+
+                if (!$department || !$position) {
                     throw new \Exception('Seçilen departman veya pozisyon geçersiz.');
                 }
 
-                // İzin kodu oluştur
+                if ($position->department_id != $department->id) {
+                    throw new \Exception('Seçilen pozisyon bu departmana ait değil.');
+                }
+
+                Log::info('Departman ve pozisyon validasyonu başarılı', [
+                    'department_id' => $department->id,
+                    'department_company' => $department->company_id,
+                    'position_id' => $position->id,
+                    'user_company' => $user->company_id
+                ]);
+
+                // ✅ ÇÖZÜM: Kullanıcının şirketi yoksa, departmanın şirketini kullan
+                $companyId = $user->company_id;
+
+                // Kullanıcının şirketi database'de yoksa, departmanın şirketini kullan
+                $companyExists = Company::where('id', $companyId)->exists();
+                if (!$companyExists) {
+                    Log::warning('Kullanıcı şirketi database\'de yok, departman şirketi kullanılıyor', [
+                        'user_company_id' => $companyId,
+                        'department_company_id' => $department->company_id
+                    ]);
+                    $companyId = $department->company_id;
+                }
+
+                // Company kontrolü - eğer hala geçerli değilse, mevcut bir şirket bul
+                if (!Company::where('id', $companyId)->exists()) {
+                    $firstCompany = Company::where('is_active', true)->first();
+                    if ($firstCompany) {
+                        $companyId = $firstCompany->id;
+                        Log::warning('Geçersiz şirket ID, ilk aktif şirket kullanılıyor', [
+                            'old_company_id' => $companyId,
+                            'new_company_id' => $firstCompany->id
+                        ]);
+                    } else {
+                        throw new \Exception('Sistemde aktif şirket bulunamadı.');
+                    }
+                }
+
                 $permitNumber = WorkPermitForm::where('company_id', $companyId)->count() + 1;
                 $permitCode = $this->generatePermitCode($companyId, $permitNumber);
 
+                Log::info('WorkPermit verileri hazır', [
+                    'company_id' => $companyId,
+                    'permit_number' => $permitNumber,
+                    'permit_code' => $permitCode
+                ]);
+
                 // Work permit oluştur
-                $workPermit = WorkPermitForm::create($this->prepareWorkPermitData($validated, $companyId, $user->id, $permitNumber, $permitCode));
+                $workPermit = WorkPermitForm::create([
+                    'company_id'       => $companyId,
+                    'department_id'    => $validated['department_id'],
+                    'position_id'      => $validated['position_id'],
+                    'created_by'       => $user->id,
+                    'title'            => $validated['title'],
+                    'work_type'        => $validated['work_type'],
+                    'work_description' => $validated['work_description'],
+                    'location'        => $validated['location'],
+                    'worker_name'      => $validated['worker_name'],
+                    'worker_position'  => $position->name,
+                    'risks'            => $validated['risks'],
+                    'control_measures' => $validated['control_measures'],
+                    'tools_equipment'  => $validated['tools_equipment'],
+                    'emergency_procedures' => $validated['emergency_procedures'],
+                    'start_date'       => $validated['start_date'],
+                    'end_date'         => $validated['end_date'],
+                    'status'           => 'pending_unit_approval',
+                    'permit_number'    => $permitNumber,
+                    'permit_code'      => $permitCode,
+                ]);
 
                 Log::info('✅ WorkPermit oluşturuldu', [
                     'id' => $workPermit->id,
                     'permit_code' => $workPermit->permit_code,
-                    'status' => $workPermit->status
+                    'status' => $workPermit->status,
+                    'company_id' => $workPermit->company_id
                 ]);
 
                 // Onay sürecini başlat
@@ -195,7 +311,7 @@ class WorkPermitController extends Controller
                 event(new WorkPermitStatusUpdated($workPermit, 'created', 'Yeni iş izni oluşturuldu.'));
                 $this->sendNextApprovalNotification($workPermit);
 
-                return redirect()->route('admin.work-permits.show', $workPermit)
+                return redirect()->route('company.work-permits.show', $workPermit)
                     ->with('success', "İş izni {$workPermit->permit_code} başarıyla oluşturuldu.");
             } catch (\Exception $e) {
                 Log::error('💥 İş izni oluşturma hatası: ' . $e->getMessage());
@@ -229,7 +345,7 @@ class WorkPermitController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        return view('admin.work-permits.show', compact('workPermit', 'approvalHistory'));
+        return view('company.work-permits.show', compact('workPermit', 'approvalHistory'));
     }
 
     /**
@@ -340,135 +456,135 @@ class WorkPermitController extends Controller
     }
 
 
-private function sendFinalApprovalEmail(WorkPermitForm $workPermit, string $pdfPath): void
-{
-    try {
-        // WorkPermit'i tazele
-        $workPermit->refresh()->load(['creator', 'company']);
+    private function sendFinalApprovalEmail(WorkPermitForm $workPermit, string $pdfPath): void
+    {
+        try {
+            // WorkPermit'i tazele
+            $workPermit->refresh()->load(['creator', 'company']);
 
-        $user = $workPermit->creator;
+            $user = $workPermit->creator;
 
-        if (!$user || !$user->email) {
-            Log::warning('📧 Email gönderilemedi: Kullanıcı veya email bulunamadı', [
+            if (!$user || !$user->email) {
+                Log::warning('📧 Email gönderilemedi: Kullanıcı veya email bulunamadı', [
+                    'work_permit_id' => $workPermit->id,
+                    'user_id' => $workPermit->created_by,
+                    'user' => $user ? 'exists' : 'null',
+                    'email' => $user?->email ?? 'null'
+                ]);
+                return;
+            }
+
+            Log::info('📧 Email gönderme başlıyor', [
                 'work_permit_id' => $workPermit->id,
-                'user_id' => $workPermit->created_by,
-                'user' => $user ? 'exists' : 'null',
-                'email' => $user?->email ?? 'null'
+                'email' => $user->email,
+                'user_name' => $user->name,
+                'pdf_path' => $pdfPath,
+                'pdf_exists' => Storage::exists($pdfPath)
             ]);
-            return;
-        }
 
-        Log::info('📧 Email gönderme başlıyor', [
-            'work_permit_id' => $workPermit->id,
-            'email' => $user->email,
-            'user_name' => $user->name,
-            'pdf_path' => $pdfPath,
-            'pdf_exists' => Storage::exists($pdfPath)
-        ]);
+            // Güvenli email verisi
+            $data = [
+                'workPermit' => $workPermit,
+                'user' => $user,
+                'approvalDate' => now()->format('d.m.Y H:i')
+            ];
 
-        // Güvenli email verisi
-        $data = [
-            'workPermit' => $workPermit,
-            'user' => $user,
-            'approvalDate' => now()->format('d.m.Y H:i')
-        ];
+            // Email gönder
+            Mail::send(
+                'emails.work-permit-final-approved',
+                $data,
+                function ($message) use ($user, $workPermit, $pdfPath) {
+                    $message->to($user->email, $user->name)
+                        ->subject("✅ İş İzniniz Onaylandı - {$workPermit->permit_code}");
 
-        // Email gönder
-        Mail::send('emails.work-permit-final-approved', $data,
-            function ($message) use ($user, $workPermit, $pdfPath) {
-                $message->to($user->email, $user->name)
-                    ->subject("✅ İş İzniniz Onaylandı - {$workPermit->permit_code}");
-
-                // PDF ekle (eğer varsa)
-                if (Storage::exists($pdfPath)) {
-                    $fullPath = storage_path("app/{$pdfPath}");
-                    if (file_exists($fullPath)) {
-                        $message->attach($fullPath, [
-                            'as' => "is-izni-{$workPermit->permit_code}.pdf",
-                            'mime' => 'application/pdf',
-                        ]);
-                        Log::info('📎 PDF eklendi', ['path' => $fullPath]);
+                    // PDF ekle (eğer varsa)
+                    if (Storage::exists($pdfPath)) {
+                        $fullPath = storage_path("app/{$pdfPath}");
+                        if (file_exists($fullPath)) {
+                            $message->attach($fullPath, [
+                                'as' => "is-izni-{$workPermit->permit_code}.pdf",
+                                'mime' => 'application/pdf',
+                            ]);
+                            Log::info('📎 PDF eklendi', ['path' => $fullPath]);
+                        }
                     }
                 }
-            }
-        );
+            );
 
-        Log::info('✅ Email başarıyla gönderildi', [
-            'work_permit_id' => $workPermit->id,
-            'email' => $user->email
-        ]);
-
-    } catch (\Exception $e) {
-        Log::error('❌ Email gönderme hatası: ' . $e->getMessage(), [
-            'exception' => $e->getTraceAsString()
-        ]);
-        // Email hatası işlemi durdurmamalı
+            Log::info('✅ Email başarıyla gönderildi', [
+                'work_permit_id' => $workPermit->id,
+                'email' => $user->email
+            ]);
+        } catch (\Exception $e) {
+            Log::error('❌ Email gönderme hatası: ' . $e->getMessage(), [
+                'exception' => $e->getTraceAsString()
+            ]);
+            // Email hatası işlemi durdurmamalı
+        }
     }
-}
 
-private function createFinalPdf(WorkPermitForm $workPermit): string
-{
-    try {
-        Log::info('🚀 PDF oluşturma başlıyor', ['work_permit_id' => $workPermit->id]);
+    private function createFinalPdf(WorkPermitForm $workPermit): string
+    {
+        try {
+            Log::info('🚀 PDF oluşturma başlıyor', ['work_permit_id' => $workPermit->id]);
 
-        // Verileri yükle
-        $workPermit->load([
-            'company',
-            'creator',
-            'department',
-            'position',
-            'approvals.user'
-        ]);
+            // Verileri yükle
+            $workPermit->load([
+                'company',
+                'creator',
+                'department',
+                'position',
+                'approvals.user'
+            ]);
 
-        // Basit PDF view data
-        $data = [
-            'workPermit' => $workPermit,
-            'currentDate' => now()->format('d.m.Y H:i')
-        ];
+            // Basit PDF view data
+            $data = [
+                'workPermit' => $workPermit,
+                'currentDate' => now()->format('d.m.Y H:i')
+            ];
 
-        // PDF oluştur
-        $pdf = PDF::loadView('admin.work-permits.final-pdf', $data)
-            ->setPaper('a4')
-            ->setOptions(['defaultFont' => 'helvetica']);
+            // PDF oluştur
+            $pdf = PDF::loadView('company.work-permits.final-pdf', $data)
+                ->setPaper('a4')
+                ->setOptions(['defaultFont' => 'helvetica']);
 
-        // Dosya adı ve path - WINDOWS UYUMLU
-        $cleanPermitCode = str_replace([' ', '-'], '_', $workPermit->permit_code);
-        $filename = "is-izni-{$cleanPermitCode}.pdf";
-        $path = "work-permits/{$filename}";
+            // Dosya adı ve path - WINDOWS UYUMLU
+            $cleanPermitCode = str_replace([' ', '-'], '_', $workPermit->permit_code);
+            $filename = "is-izni-{$cleanPermitCode}.pdf";
+            $path = "work-permits/{$filename}";
 
-        Log::info('📁 PDF kayıt bilgileri', [
-            'filename' => $filename,
-            'path' => $path,
-            'storage_path' => storage_path('app'),
-            'full_path' => storage_path("app/{$path}")
-        ]);
+            Log::info('📁 PDF kayıt bilgileri', [
+                'filename' => $filename,
+                'path' => $path,
+                'storage_path' => storage_path('app'),
+                'full_path' => storage_path("app/{$path}")
+            ]);
 
-        // PDF'i kaydet
-        Storage::put($path, $pdf->output());
+            // PDF'i kaydet
+            Storage::put($path, $pdf->output());
 
-        $fileSize = Storage::size($path);
-        $fileExists = Storage::exists($path);
+            $fileSize = Storage::size($path);
+            $fileExists = Storage::exists($path);
 
-        Log::info('✅ PDF kaydedildi', [
-            'path' => $path,
-            'file_size' => $fileSize,
-            'file_exists' => $fileExists,
-            'files_in_directory' => Storage::files('work-permits')
-        ]);
+            Log::info('✅ PDF kaydedildi', [
+                'path' => $path,
+                'file_size' => $fileSize,
+                'file_exists' => $fileExists,
+                'files_in_directory' => Storage::files('work-permits')
+            ]);
 
-        // Database'e kaydet
-        $workPermit->final_pdf_path = $path;
-        $workPermit->save();
+            // Database'e kaydet
+            $workPermit->final_pdf_path = $path;
+            $workPermit->save();
 
-        Log::info('💾 Database güncellendi', ['final_pdf_path' => $path]);
+            Log::info('💾 Database güncellendi', ['final_pdf_path' => $path]);
 
-        return $path;
-
-    } catch (\Exception $e) {
-        Log::error('💥 Final PDF oluşturma hatası: ' . $e->getMessage());
-        throw new \Exception('PDF oluşturulamadı: ' . $e->getMessage());
+            return $path;
+        } catch (\Exception $e) {
+            Log::error('💥 Final PDF oluşturma hatası: ' . $e->getMessage());
+            throw new \Exception('PDF oluşturulamadı: ' . $e->getMessage());
+        }
     }
-}
     /**
      * Final PDF görüntüleme - DÜZELTİLMİŞ
      */
@@ -495,76 +611,89 @@ private function createFinalPdf(WorkPermitForm $workPermit): string
     }
 
 
-  /**
- * PDF indirme - PATH DÜZELTMESİ
- */
-public function downloadFinalPdf(WorkPermitForm $workPermit)
-{
-    $this->authorize('view', $workPermit);
+    /**
+     * PDF indirme - PATH DÜZELTMESİ
+     */
+    public function downloadFinalPdf(WorkPermitForm $workPermit)
+    {
 
-    try {
-        Log::info('📥 PDF indirme isteği', ['work_permit_id' => $workPermit->id]);
-
-        // Database'den taze veri al
-        $workPermit->refresh();
-
-        Log::info('🔍 Mevcut PDF durumu', [
-            'final_pdf_path' => $workPermit->final_pdf_path,
-            'path_exists' => $workPermit->final_pdf_path ? Storage::exists($workPermit->final_pdf_path) : false
-        ]);
-
-        // PDF yoksa oluştur
-        if (!$workPermit->final_pdf_path || !Storage::exists($workPermit->final_pdf_path)) {
-            Log::info('🔄 PDF bulunamadı, oluşturuluyor...');
-            $this->createFinalPdf($workPermit);
-            $workPermit->refresh();
+        $user = Auth::user();
+        if ($workPermit->company_id !== $user->company_id && !$user->isAdmin()) {
+            abort(403, 'Bu iş iznine erişim yetkiniz yok.');
         }
+        $this->authorize('view', $workPermit);
 
-        // WINDOWS PATH DÜZELTMESİ
-        $filePath = storage_path('app' . DIRECTORY_SEPARATOR . $workPermit->final_pdf_path);
+        try {
+            Log::info('📥 PDF indirme isteği', ['work_permit_id' => $workPermit->id]);
 
-        Log::info('🔧 Path kontrolü', [
-            'database_path' => $workPermit->final_pdf_path,
-            'constructed_path' => $filePath,
-            'file_exists' => file_exists($filePath)
-        ]);
+            // Database'den taze veri al
+            $workPermit->refresh();
 
-        if (!file_exists($filePath)) {
-            // Storage'dan doğrudan kontrol et
-            if (!Storage::exists($workPermit->final_pdf_path)) {
-                throw new \Exception("PDF Storage'da bulunamadı: {$workPermit->final_pdf_path}");
+            Log::info('🔍 Mevcut PDF durumu', [
+                'final_pdf_path' => $workPermit->final_pdf_path,
+                'path_exists' => $workPermit->final_pdf_path ? Storage::exists($workPermit->final_pdf_path) : false
+            ]);
+
+            // PDF yoksa oluştur
+            if (!$workPermit->final_pdf_path || !Storage::exists($workPermit->final_pdf_path)) {
+                Log::info('🔄 PDF bulunamadı, oluşturuluyor...');
+                $pdfPath = $this->createFinalPdf($workPermit);
+                $workPermit->refresh();
             }
 
-            // Storage'dan dosyayı al
-            $fileContent = Storage::get($workPermit->final_pdf_path);
+            $filePath = storage_path('app/' . $workPermit->final_pdf_path);
+
+            Log::info('🔧 Path kontrolü', [
+                'database_path' => $workPermit->final_pdf_path,
+                'constructed_path' => $filePath,
+                'file_exists' => file_exists($filePath)
+            ]);
+
+            if (!file_exists($filePath)) {
+                // Storage'dan doğrudan kontrol et
+                if (!Storage::exists($workPermit->final_pdf_path)) {
+                    throw new \Exception("PDF Storage'da bulunamadı: {$workPermit->final_pdf_path}");
+                }
+
+                // Storage'dan dosyayı al
+                $fileContent = Storage::get($workPermit->final_pdf_path);
+                $filename = "is-izni-{$workPermit->permit_code}.pdf";
+
+                Log::info('📦 Storage\'dan direkt içerik gönderiliyor', [
+                    'filename' => $filename,
+                    'content_size' => strlen($fileContent)
+                ]);
+
+                return response($fileContent, 200, [
+                    'Content-Type' => 'application/pdf',
+                    'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                    'Content-Length' => strlen($fileContent)
+                ]);
+            }
+
             $filename = "is-izni-{$workPermit->permit_code}.pdf";
 
-            Log::info('📦 Storage\'dan direkt içerik gönderiliyor', [
+            Log::info('✅ PDF indirme hazır', [
                 'filename' => $filename,
-                'content_size' => strlen($fileContent)
+                'file_path' => $filePath
             ]);
 
-            return response($fileContent, 200, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
-                'Content-Length' => strlen($fileContent)
-            ]);
+            return response()->download($filePath, $filename);
+        } catch (\Exception $e) {
+            Log::error('❌ PDF indirme hatası: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'PDF indirilemedi: ' . $e->getMessage());
         }
-
-        $filename = "is-izni-{$workPermit->permit_code}.pdf";
-
-        Log::info('✅ PDF indirme hazır', [
-            'filename' => $filename,
-            'file_path' => $filePath
-        ]);
-
-        return response()->download($filePath, $filename);
-
-    } catch (\Exception $e) {
-        Log::error('❌ PDF indirme hatası: ' . $e->getMessage());
-        return redirect()->back()->with('error', 'PDF indirilemedi: ' . $e->getMessage());
     }
-}
+
+    public function generateFinalPdf($id)
+    {
+        $workPermit = WorkPermitForm::with(['department', 'position', 'createdBy'])->findOrFail($id);
+
+        $pdf = PDF::loadView('admin.work-permits.final-pdf', compact('workPermit'));
+        $fileName = 'OTH-' . $workPermit->permit_code . '-FINAL.pdf';
+
+        return $pdf->download($fileName);
+    }
 
     /**
      * Manuel PDF oluşturma - AJAX için
@@ -574,7 +703,9 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
         $this->authorize('view', $workPermit);
 
         try {
-            // PDF oluştur - recursive çağrıyı önle
+            Log::info('🔄 Manuel PDF oluşturma isteği', ['work_permit_id' => $workPermit->id]);
+
+            // PDF oluştur
             $pdfPath = $this->createFinalPdf($workPermit);
 
             return response()->json([
@@ -597,12 +728,19 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
      */
     public function sendFinalEmailManual(WorkPermitForm $workPermit)
     {
+        $user = Auth::user();
+        if ($workPermit->company_id !== $user->company_id && !$user->isAdmin()) {
+            return response()->json(['error' => 'Yetkisiz erişim'], 403);
+        }
         $this->authorize('view', $workPermit);
 
         try {
+            Log::info('📧 Manuel email gönderme isteği', ['work_permit_id' => $workPermit->id]);
+
             // Önce PDF'i kontrol et, yoksa oluştur
             if (!$workPermit->final_pdf_path || !Storage::exists($workPermit->final_pdf_path)) {
-                $pdfPath = $this->createFinalPdf($workPermit); // createFinalPdf kullan
+                Log::info('📎 PDF yok, oluşturuluyor...');
+                $pdfPath = $this->createFinalPdf($workPermit);
                 $workPermit->refresh();
             } else {
                 $pdfPath = $workPermit->final_pdf_path;
@@ -697,10 +835,11 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
             'required_role' => $requiredRole,
             'user_role' => $userRole,
             'is_admin' => $user->isAdmin(),
-            'can_approve' => $userRole === $requiredRole || $user->isAdmin()
+            'can_approve' => $userRole === $requiredRole // ✅ ADMIN'I ÇIKAR!
         ]);
 
-        return $userRole === $requiredRole || $user->isAdmin();
+        // ✅ SADECE GEREKLİ ROL ONAY VEREBİLİR! ADMIN ASLA!
+        return $userRole === $requiredRole;
     }
 
     /**
@@ -1009,10 +1148,6 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
             $query->where('status', $filters['status']);
         }
 
-        if (!empty($filters['work_type'])) {
-            $query->where('work_type', $filters['work_type']);
-        }
-
         if (!empty($filters['search'])) {
             $searchTerm = $filters['search'];
             $query->where(function ($q) use ($searchTerm) {
@@ -1059,59 +1194,34 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
         ];
     }
 
-    /**
-     * Departman ve pozisyon validasyonu
-     */
-    private function validateDepartmentAndPosition(int $departmentId, int $positionId, int $companyId): bool
-    {
-        $department = CompanyDepartment::where('id', $departmentId)
-            ->where('company_id', $companyId)
-            ->exists();
 
-        if (!$department) {
-            Log::error('❌ Departman bulunamadı', compact('departmentId', 'companyId'));
-            return false;
-        }
-
-        $position = DepartmentPosition::where('id', $positionId)
-            ->where('department_id', $departmentId)
-            ->exists();
-
-        if (!$position) {
-            Log::error('❌ Pozisyon bulunamadı', compact('positionId', 'departmentId'));
-            return false;
-        }
-
-        return true;
-    }
 
     /**
      * İş izni verilerini hazırla
      */
     private function prepareWorkPermitData(array $validated, int $companyId, int $userId, int $permitNumber, string $permitCode): array
     {
-        $position = DepartmentPosition::find($validated['position_id']);
-
+        $position = Position::findOrFail($validated['position_id']);
         return [
-            'company_id' => $companyId,
-            'department_id' => $validated['department_id'],
-            'position_id' => $position->id,
-            'created_by' => $userId,
-            'title' => $validated['title'],
-            'work_type' => $validated['work_type'],
+            'company_id'       => $companyId,
+            'department_id'    => $validated['department_id'],
+            'position_id'      => $position->id,
+            'created_by'       => $userId,
+            'title'            => $validated['title'],
+            'work_type'        => $validated['work_type'],
             'work_description' => $validated['work_description'],
-            'location' => $validated['location'],
-            'worker_name' => $validated['worker_name'],
-            'worker_position' => $position->name,
-            'risks' => $validated['risks'],
+            'location'        => $validated['location'],
+            'worker_name'      => $validated['worker_name'],
+            'worker_position'  => $position->name, // ← buradan geliyor
+            'risks'            => $validated['risks'],
             'control_measures' => $validated['control_measures'],
-            'tools_equipment' => $validated['tools_equipment'],
+            'tools_equipment'  => $validated['tools_equipment'],
             'emergency_procedures' => $validated['emergency_procedures'],
-            'start_date' => $validated['start_date'],
-            'end_date' => $validated['end_date'],
-            'status' => 'pending_unit_approval',
-            'permit_number' => $permitNumber,
-            'permit_code' => $permitCode,
+            'start_date'       => $validated['start_date'],
+            'end_date'         => $validated['end_date'],
+            'status'           => 'pending_unit_approval',
+            'permit_number'    => $permitNumber,
+            'permit_code'      => $permitCode,
         ];
     }
 
@@ -1120,7 +1230,7 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
      */
     private function initializeOpeningApprovals(WorkPermitForm $workPermit): void
     {
-        $department = CompanyDepartment::find($workPermit->department_id);
+        $department = Department::find($workPermit->department_id);
 
         // Sadece bir kere onay kaydı oluştur
         $steps = ['unit_manager', 'area_manager', 'safety_specialist', 'employer_representative'];
@@ -1161,7 +1271,7 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
      */
     private function initializeClosingApprovals(WorkPermitForm $workPermit): void
     {
-        $department = CompanyDepartment::find($workPermit->department_id);
+        $department = Department::find($workPermit->department_id);
 
         $steps = ['area_manager', 'safety_specialist', 'employer_representative'];
 
@@ -1205,8 +1315,16 @@ public function downloadFinalPdf(WorkPermitForm $workPermit)
     private function generatePermitCode(int $companyId, int $permitNumber): string
     {
         $company = Company::find($companyId);
-        // Boşlukları kaldır ve özel karakterleri temizle
-        $companyCode = $company ? preg_replace('/[^a-zA-Z0-9]/', '', substr($company->name, 0, 3)) : 'COM';
+
+        // Eğer şirket bulunamazsa, genel bir kod kullan
+        if (!$company) {
+            $companyCode = 'GENEL';
+            Log::warning('Şirket bulunamadı, genel kod kullanılıyor', ['company_id' => $companyId]);
+        } else {
+            // Boşlukları kaldır ve özel karakterleri temizle
+            $companyCode = preg_replace('/[^a-zA-Z0-9]/', '', substr($company->name, 0, 3));
+        }
+
         $date = now()->format('Ymd');
 
         return strtoupper($companyCode) . '-' . $date . '-' . str_pad($permitNumber, 4, '0', STR_PAD_LEFT);

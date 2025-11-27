@@ -16,8 +16,7 @@ class User extends Authenticatable
         'password',
         'company_id',
         'department_id',
-        'position',
-        'phone',
+        'position_id',
         'is_active',
         'email_verified_at'
     ];
@@ -83,20 +82,20 @@ class User extends Authenticatable
     /**
      * Tekil rol kontrolü
      */
- public function hasRole($role): bool
-{
-    // String geldiyse enum'a çevir
-    if (is_string($role)) {
-        $role = Role::from($role);
-    }
+    public function hasRole($role): bool
+    {
+        // String geldiyse enum'a çevir
+        if (is_string($role)) {
+            $role = Role::from($role);
+        }
 
-    // Enum instance geldiyse
-    if ($role instanceof Role) {
-        return $this->role->value === $role->value;
-    }
+        // Enum instance geldiyse
+        if ($role instanceof Role) {
+            return $this->role->value === $role->value;
+        }
 
-    return false;
-}
+        return false;
+    }
 
     /**
      * Shortcut role methods
@@ -146,6 +145,16 @@ class User extends Authenticatable
     public function company()
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function position()
+    {
+        return $this->belongsTo(Position::class);
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
     }
 
     /**

@@ -123,16 +123,15 @@ class WorkPermitForm extends Model
         return $this->belongsTo(Company::class);
     }
 
-    public function department()
-    {
-        return $this->belongsTo(CompanyDepartment::class, 'department_id');
-    }
-
     public function position()
     {
-        return $this->belongsTo(DepartmentPosition::class, 'position_id');
+        return $this->belongsTo(Position::class);
     }
 
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
+    }
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');

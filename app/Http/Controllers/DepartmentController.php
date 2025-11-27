@@ -2,161 +2,180 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CompanyDepartment;
+use App\Models\Department;
 use App\Models\Company;
-use App\Models\DepartmentPosition;
+use App\Models\Position;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
 class DepartmentController extends Controller
 {
     public function index()
     {
-        $user = Auth::user();
-        $company = $user->companies->first();
+        $departments = Department::with(['company', 'positions'])
+            ->withCount('positions')
+            ->withCount('workPermits')
+            ->orderBy('company_id')
+            ->orderBy('name')
+            ->paginate(20);
 
-        if (!$company) {
-            return redirect()->route('admin.dashboard')->with('error', 'Şirket bulunamadı.');
-        }
+        $companies = Company::where('is_active', true)->orderBy('name')->get();
 
-        $departments = $company->departments()->withCount(['formTemplates', 'workPermits'])->get();
-
-        return view('admin.departments.index', compact('departments', 'company'));
+        return view('admin.departments', compact('departments', 'companies'));
     }
 
-    public function create()
+    public function store(Request $request): JsonResponse
     {
-        $user = Auth::user();
-        $company = $user->companies->first();
+        try {
+            $validated = $request->validate([
+                'company_id' => 'required|exists:companies,id',
+                'name' => 'required|string|max:255|unique:departments,name,NULL,id,company_id,' . $request->company_id,
+                'description' => 'nullable|string|max:1000',
+                'is_active' => 'sometimes|boolean',
+            ]);
 
-        if (!$company) {
-            return redirect()->route('admin.dashboard')->with('error', 'Şirket bulunamadı.');
+            $department = Department::create([
+                'company_id' => $validated['company_id'],
+                'name' => $validated['name'],
+                'description' => $validated['description'] ?? null,
+                'is_active' => $request->boolean('is_active', true),
+                'approval_workflow' => ['unit_manager', 'area_manager', 'safety_specialist', 'employer_representative']
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Departman başarıyla oluşturuldu',
+                'department' => $department
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Doğrulama hatası',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Departman oluşturulurken hata oluştu: ' . $e->getMessage()
+            ], 500);
         }
-
-        return view('admin.departments.create', compact('company'));
     }
 
-    public function store(Request $request)
+    public function edit(Department $department): JsonResponse
     {
-        $user = Auth::user();
-        $company = $user->companies->first();
-
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'approval_workflow' => 'nullable|array',
-            'users' => 'nullable|array',
-            'users.*.user_id' => 'required|exists:users,id',
-            'users.*.role' => 'required|string',
+        return response()->json([
+            'department' => $department->load('company')
         ]);
+    }
 
-        // Departmanı oluştur
-        $department = CompanyDepartment::create([
-            'company_id' => $company->id,
-            'name' => $validated['name'],
-            'approval_workflow' => $validated['approval_workflow'] ?? (new CompanyDepartment())->getDefaultWorkflow(),
-        ]);
+    public function update(Request $request, Department $department): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'company_id' => 'required|exists:companies,id',
+                'name' => 'required|string|max:255|unique:departments,name,' . $department->id . ',id,company_id,' . $request->company_id,
+                'description' => 'nullable|string|max:1000',
+                'is_active' => 'sometimes|boolean',
+            ]);
 
-        // Kullanıcıları departmana ata
-        if (isset($validated['users'])) {
-            foreach ($validated['users'] as $userData) {
-                $department->users()->attach($userData['user_id'], [
-                    'role' => $userData['role']
-                ]);
+            $department->update([
+                'company_id' => $validated['company_id'],
+                'name' => $validated['name'],
+                'description' => $validated['description'] ?? null,
+                'is_active' => $request->boolean('is_active', true),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Departman başarıyla güncellendi',
+                'department' => $department
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Doğrulama hatası',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Departman güncellenirken hata oluştu: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function destroy(Department $department): JsonResponse
+    {
+        try {
+            if ($department->workPermits()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bu departmanda iş izinleri bulunuyor, silinemez!'
+                ], 422);
             }
-        }
 
-        return redirect()->route('departments.show', $department)
-            ->with('success', 'Departman başarıyla oluşturuldu.');
-    }
-
-// DepartmentController - positions metodunu kontrol et
-public function positions($department)
-{
-    try {
-        Log::info("Pozisyon isteği - Departman ID: {$department}");
-
-        $department = CompanyDepartment::with('positions')->find($department);
-
-        if (!$department) {
-            return response()->json(['error' => 'Departman bulunamadı'], 404);
-        }
-
-        Log::info("Pozisyonlar: " . $department->positions->toJson());
-
-        return response()->json($department->positions);
-
-    } catch (\Exception $e) {
-        Log::error('Hata: ' . $e->getMessage());
-        return response()->json(['error' => 'Sunucu hatası'], 500);
-    }
-}
-
-
-    public function show(CompanyDepartment $department)
-    {
-        $this->authorize('view', $department);
-
-        $department->load(['users', 'formTemplates', 'workPermits' => function ($query) {
-            $query->latest()->take(10);
-        }]);
-
-        return view('admin.departments.show', compact('department'));
-    }
-
-    public function edit(CompanyDepartment $department)
-    {
-        $this->authorize('update', $department);
-
-        $companyUsers = $department->company->users;
-
-        return view('admin.departments.edit', compact('department', 'companyUsers'));
-    }
-
-    public function update(Request $request, CompanyDepartment $department)
-    {
-        $this->authorize('update', $department);
-
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'approval_workflow' => 'nullable|array',
-            'users' => 'nullable|array',
-            'users.*.user_id' => 'required|exists:users,id',
-            'users.*.role' => 'required|string',
-        ]);
-
-        $department->update([
-            'name' => $validated['name'],
-            'approval_workflow' => $validated['approval_workflow'] ?? $department->approval_workflow,
-        ]);
-
-        // Kullanıcıları güncelle
-        if (isset($validated['users'])) {
-            $department->users()->detach();
-
-            foreach ($validated['users'] as $userData) {
-                $department->users()->attach($userData['user_id'], [
-                    'role' => $userData['role']
-                ]);
+            if ($department->positions()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Bu departmanda pozisyonlar bulunuyor, önce pozisyonları silin!'
+                ], 422);
             }
-        }
 
-        return redirect()->route('admin.departments.show', $department)
-            ->with('success', 'Departman başarıyla güncellendi.');
+            $department->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Departman başarıyla silindi'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Silme işlemi sırasında hata oluştu: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
-    public function destroy(CompanyDepartment $department)
+    public function positions(Department $department)
     {
-        $this->authorize('delete', $department);
+        $positions = $department->positions()
+            ->where('is_active', 1)
+            ->select('id', 'name')
+            ->get();
 
-        // Departmanda iş izni varsa silme
-        if ($department->workPermits()->count() > 0) {
-            return redirect()->back()->with('error', 'Bu departmanda iş izinleri bulunuyor. Önce iş izinlerini silmelisiniz.');
+        return response()->json($positions);
+    }
+
+    public function getDepartmentPositions(Department $department): JsonResponse
+    {
+        try {
+            $positions = $department->positions()
+                ->where('is_active', true)
+                ->select('id', 'name')
+                ->get();
+
+            return response()->json($positions);
+        } catch (\Exception $e) {
+            Log::error('Positions fetch error:', ['error' => $e->getMessage()]);
+            return response()->json([], 500);
         }
+    }
 
-        $department->delete();
+    public function toggleStatus(Department $department): JsonResponse
+    {
+        try {
+            $department->update(['is_active' => !$department->is_active]);
 
-        return redirect()->route('admin.departments.index')
-            ->with('success', 'Departman başarıyla silindi.');
+            return response()->json([
+                'success' => true,
+                'message' => 'Departman durumu güncellendi',
+                'is_active' => $department->is_active
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Durum güncellenirken hata oluştu: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

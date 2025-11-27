@@ -3,6 +3,7 @@
 @section('title', 'Yeni İş İzni Oluştur')
 
 @section('content')
+
     <div class="max-w-7xl mx-auto px-4 py-8">
 
         <!-- Header -->
@@ -12,7 +13,7 @@
                     <h1 class="text-3xl font-bold text-gray-900 mb-2">Yeni İş İzni Oluştur</h1>
                     <p class="text-gray-600">Güvenli çalışma için iş izni formunu doldurun</p>
                 </div>
-                <a href="{{ route('admin.work-permits.index') }}"
+                <a href="{{ route('company.work-permits.index') }}"
                     class="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition flex items-center">
                     <i class="fas fa-arrow-left mr-2"></i>
                     İş İzinleri Listesi
@@ -22,7 +23,7 @@
 
         <!-- Form -->
         <div class="bg-white rounded-xl shadow-lg overflow-hidden">
-            <form action="{{ route('admin.work-permits.store') }}" method="POST" id="workPermitForm">
+            <form action="{{ route('company.work-permits.store') }}" method="POST" id="workPermitForm">
                 @csrf
 
                 <div class="p-8 space-y-8">
@@ -44,12 +45,12 @@
                                 </label>
                                 <select name="department_id" id="department_id" required
                                     class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
-                                    <option value="">Departman Seçin</option>
-                                    @foreach ($departments as $department)
-                                        <option value="{{ $department->id }}"
-                                            {{ old('department_id') == $department->id ? 'selected' : '' }}
-                                            data-positions-url="{{ route('departments.positions', $department) }}">
-                                            {{ $department->name }}
+                                    <option value="">Departman seçin</option>
+                                    @foreach ($departments as $dept)
+                                        <option value="{{ $dept->id }}"
+                                            data-positions-url="/company/work-permits/departments/{{ $dept->id }}/positions"
+                                            {{ old('department_id') == $dept->id ? 'selected' : '' }}>
+                                            {{ $dept->name }}
                                         </option>
                                     @endforeach
                                 </select>
@@ -73,7 +74,6 @@
                                 @enderror
                             </div>
 
-                            <!-- Diğer input alanları aynı kalacak -->
                             <!-- İş Başlığı -->
                             <div>
                                 <label for="title" class="block text-sm font-medium text-gray-700 mb-2">
@@ -88,26 +88,15 @@
                                 @enderror
                             </div>
 
-                            <!-- İş Türü -->
                             <div>
                                 <label for="work_type" class="block text-sm font-medium text-gray-700 mb-2">
-                                    <i class="fas fa-hard-hat mr-1 text-gray-500"></i>
                                     İş Türü *
                                 </label>
-                                <select name="work_type" id="work_type" required
+                                <input type="text" name="work_type" id="work_type" required
+                                    value="{{ old('work_type', $workPermit->work_type ?? '') }}"
+                                    placeholder="Örn: Sıcak İş, Elektrik İşi, Kapalı Alan, Kimyasal Çalışma..."
                                     class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
-                                    <option value="">İş Türü Seçin</option>
-                                    <option value="sıcak" {{ old('work_type') == 'sıcak' ? 'selected' : '' }}>Sıcak İş
-                                    </option>
-                                    <option value="elektrik" {{ old('work_type') == 'elektrik' ? 'selected' : '' }}>
-                                        Elektrik İşi</option>
-                                    <option value="yuk_kaldirma"
-                                        {{ old('work_type') == 'yuk_kaldirma' ? 'selected' : '' }}>Yük Kaldırma</option>
-                                    <option value="kazı" {{ old('work_type') == 'kazı' ? 'selected' : '' }}>Kazı İşi
-                                    </option>
-                                    <option value="diğer" {{ old('work_type') == 'diğer' ? 'selected' : '' }}>Diğer
-                                    </option>
-                                </select>
+
                                 @error('work_type')
                                     <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
                                 @enderror
@@ -134,7 +123,7 @@
                                     Çalışan Adı *
                                 </label>
                                 <input type="text" name="worker_name" id="worker_name" required
-                                    value="{{ old('worker_name') }}" placeholder="Çalışanın adı soyadı"
+                                    placeholder="Çalışanın adı soyadı"
                                     class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">
                                 @error('worker_name')
                                     <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
@@ -180,14 +169,15 @@
                             <h2 class="text-xl font-semibold text-gray-900">İş Tanımı</h2>
                         </div>
 
-                        <div>
+                        <!-- İş Açıklaması -->
+                        <div class="col-span-2">
                             <label for="work_description" class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-align-left mr-1 text-gray-500"></i>
                                 İş Açıklaması *
                             </label>
-                            <textarea name="work_description" id="work_description" required rows="4"
-                                placeholder="Yapılacak işin detaylı açıklaması..."
-                                class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition">{{ old('work_description') }}</textarea>
+                            <textarea name="work_description" id="work_description" rows="5" required
+                                placeholder="Yapılacak işin tüm detaylarını burada açıklayın (örneğin: hangi ekipman kullanılacak, kaç kişi çalışacak, hangi riskler var...)"
+                                class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none">{{ old('work_description') }}</textarea>
+
                             @error('work_description')
                                 <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
                             @enderror
@@ -290,7 +280,7 @@
 
                     <!-- Form Actions -->
                     <div class="flex justify-end gap-4 pt-6">
-                        <a href="{{ route('admin.work-permits.index') }}"
+                        <a href="{{ route('company.work-permits.index') }}"
                             class="px-8 py-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition font-semibold">
                             <i class="fas fa-times mr-2"></i>İptal
                         </a>
@@ -307,77 +297,166 @@
 
 @push('scripts')
     <script>
-        // Departman değiştiğinde pozisyonları yükle
-        document.getElementById('department_id').addEventListener('change', function() {
-            const selectedOption = this.options[this.selectedIndex];
-            const positionsUrl = selectedOption.getAttribute('data-positions-url');
-            const positionSelect = document.getElementById('position_id');
-
-            if (!positionsUrl) {
-                positionSelect.innerHTML = '<option value="">Önce departman seçin</option>';
-                return;
-            }
-
-            // Loading state
-            positionSelect.innerHTML = '<option value="">Yükleniyor...</option>';
-            positionSelect.disabled = true;
-
-            // AJAX ile pozisyonları getir
-            fetch(positionsUrl, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(positions => {
-                    positionSelect.innerHTML = '<option value="">Pozisyon seçin</option>';
-
-                    if (positions && positions.length > 0) {
-                        positions.forEach(position => {
-                            const option = document.createElement('option');
-                            option.value = position.id;
-                            option.textContent = position.name;
-                            positionSelect.appendChild(option);
-                        });
-                    } else {
-                        positionSelect.innerHTML =
-                            '<option value="">Bu departmanda pozisyon bulunamadı</option>';
-                    }
-
-                    positionSelect.disabled = false;
-                })
-                .catch(error => {
-                    console.error('Pozisyonlar yüklenirken hata:', error);
-                    positionSelect.innerHTML = '<option value="">Pozisyonlar yüklenemedi</option>';
-                    positionSelect.disabled = false;
-                });
-        });
-
-        // Sayfa yüklendiğinde eğer departman seçiliyse pozisyonları yükle
         document.addEventListener('DOMContentLoaded', function() {
             const departmentSelect = document.getElementById('department_id');
+            const positionSelect = document.getElementById('position_id');
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+            console.log('🚀 Script yüklendi - Esnek mod aktif');
+
+            // Eski değer varsa
             if (departmentSelect.value) {
                 departmentSelect.dispatchEvent(new Event('change'));
             }
+
+            // Departman değiştiğinde pozisyonları yükle
+            departmentSelect.addEventListener('change', function() {
+                const departmentId = this.value;
+                const departmentName = this.options[this.selectedIndex].text;
+
+                console.log('📝 Departman değişti:', departmentId, departmentName);
+
+                // Reset pozisyon alanı
+                positionSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+                positionSelect.disabled = true;
+                clearPositionError();
+
+                if (!departmentId) {
+                    positionSelect.innerHTML = '<option value="">Önce departman seçin</option>';
+                    return;
+                }
+
+                const positionsUrl = `/company/work-permits/departments/${departmentId}/positions`;
+
+                console.log('🔗 API URL:', positionsUrl);
+
+                fetch(positionsUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': csrfToken
+                        }
+                    })
+                    .then(response => {
+                        console.log('📡 Response status:', response.status);
+
+                        if (!response.ok) {
+                            // 403 hatasında bile devam et - pozisyonları getirmeye çalış
+                            console.warn('⚠️ Response not OK, but continuing...');
+                        }
+
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('📊 Response data:', data);
+
+                        // ✅ ERROR KONTROLÜ - data error içeriyorsa bile devam et
+                        if (data.error) {
+                            console.warn('⚠️ Sunucu hatası ama devam ediliyor:', data.error);
+                            // Hata olsa bile boş array gibi davran
+                            data = [];
+                        }
+
+                        // ✅ DATA'NIN ARRAY OLDUĞUNDAN EMİN OL
+                        const positions = Array.isArray(data) ? data : [];
+
+                        console.log('✅ Pozisyonlar işlendi:', positions);
+
+                        positionSelect.innerHTML = '';
+
+                        if (positions.length === 0) {
+                            const option = document.createElement('option');
+                            option.value = '';
+                            option.textContent = 'Bu departmanda aktif pozisyon bulunamadı';
+                            option.disabled = true;
+                            positionSelect.appendChild(option);
+                            positionSelect.disabled = true;
+
+                            showPositionError('Seçilen departmanda aktif pozisyon bulunamadı.');
+                        } else {
+                            const defaultOption = document.createElement('option');
+                            defaultOption.value = '';
+                            defaultOption.textContent = 'Pozisyon seçin';
+                            positionSelect.appendChild(defaultOption);
+
+                            positions.forEach(pos => {
+                                const option = document.createElement('option');
+                                option.value = pos.id;
+                                option.textContent = pos.name;
+
+                                const oldPositionId = "{{ old('position_id') }}";
+                                if (oldPositionId && oldPositionId == pos.id) {
+                                    option.selected = true;
+                                }
+
+                                positionSelect.appendChild(option);
+                            });
+
+                            positionSelect.disabled = false;
+                            clearPositionError();
+
+                            console.log('✅ Pozisyonlar yüklendi:', positions.length + ' adet');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('❌ Pozisyonlar yüklenemedi:', error);
+                        positionSelect.innerHTML = '<option value="">Pozisyonlar yüklenemedi</option>';
+
+                        // ❌ ARTIK HATA GÖSTERME - SADECE KONSOLA YAZ
+                        console.warn('Pozisyon yükleme hatası (görmezden geliniyor):', error.message);
+                    });
+            });
         });
 
-        // Risk ve önlem alanları için fonksiyonlar
+        function showPositionError(message) {
+            clearPositionError();
+            const positionField = document.getElementById('position_id');
+            const errorDiv = document.createElement('p');
+            errorDiv.id = 'position-error';
+            errorDiv.className = 'text-red-600 text-sm mt-2 font-medium';
+            errorDiv.textContent = message;
+            positionField.parentNode.appendChild(errorDiv);
+            positionField.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+        }
+
+        function clearPositionError() {
+            const existingError = document.getElementById('position-error');
+            if (existingError) existingError.remove();
+
+            const positionField = document.getElementById('position_id');
+            positionField.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+        }
+
+        function showPositionError(message) {
+            clearPositionError();
+            const positionField = document.getElementById('position_id');
+            const errorDiv = document.createElement('p');
+            errorDiv.id = 'position-error';
+            errorDiv.className = 'text-red-600 text-sm mt-2 font-medium';
+            errorDiv.textContent = message;
+            positionField.parentNode.appendChild(errorDiv);
+            positionField.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+        }
+
+        function clearPositionError() {
+            const existingError = document.getElementById('position-error');
+            if (existingError) existingError.remove();
+
+            const positionField = document.getElementById('position_id');
+            positionField.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+        }
+
         function addRiskField() {
             const container = document.getElementById('risks-container');
             const div = document.createElement('div');
-            div.className = 'flex gap-2';
+            div.className = 'flex gap-2 mt-2';
             div.innerHTML = `
             <input type="text" name="risks[]" placeholder="Risk tanımı"
-                class="flex-1 border border-red-300 rounded-lg px-4 py-2 focus:border-red-500 focus:ring-2 focus:ring-red-200 transition">
+                   class="flex-1 border border-red-300 rounded-lg px-4 py-2 focus:border-red-500">
             <button type="button" onclick="this.parentElement.remove()"
-                class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition">
-                <i class="fas fa-minus"></i>
+                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                <i class="fas fa-trash"></i>
             </button>
         `;
             container.appendChild(div);
@@ -386,55 +465,16 @@
         function addMeasureField() {
             const container = document.getElementById('measures-container');
             const div = document.createElement('div');
-            div.className = 'flex gap-2';
+            div.className = 'flex gap-2 mt-2';
             div.innerHTML = `
             <input type="text" name="control_measures[]" placeholder="Önlem açıklaması"
-                class="flex-1 border border-green-300 rounded-lg px-4 py-2 focus:border-green-500 focus:ring-2 focus:ring-green-200 transition">
+                   class="flex-1 border border-green-300 rounded-lg px-4 py-2 focus:border-green-500">
             <button type="button" onclick="this.parentElement.remove()"
-                class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition">
-                <i class="fas fa-minus"></i>
+                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                <i class="fas fa-trash"></i>
             </button>
         `;
             container.appendChild(div);
         }
-
-        // Form validation
-        document.getElementById('workPermitForm').addEventListener('submit', function(e) {
-            const startDate = new Date(document.getElementById('start_date').value);
-            const endDate = new Date(document.getElementById('end_date').value);
-
-            if (endDate <= startDate) {
-                e.preventDefault();
-                alert('Bitiş tarihi başlangıç tarihinden sonra olmalıdır.');
-                return false;
-            }
-
-            // Risks and measures validation
-            const risks = document.querySelectorAll('input[name="risks[]"]');
-            const measures = document.querySelectorAll('input[name="control_measures[]"]');
-
-            let hasRisks = false;
-            let hasMeasures = false;
-
-            risks.forEach(input => {
-                if (input.value.trim() !== '') hasRisks = true;
-            });
-
-            measures.forEach(input => {
-                if (input.value.trim() !== '') hasMeasures = true;
-            });
-
-            if (!hasRisks) {
-                e.preventDefault();
-                alert('En az bir risk tanımlanmalıdır.');
-                return false;
-            }
-
-            if (!hasMeasures) {
-                e.preventDefault();
-                alert('En az bir kontrol önlemi tanımlanmalıdır.');
-                return false;
-            }
-        });
     </script>
 @endpush

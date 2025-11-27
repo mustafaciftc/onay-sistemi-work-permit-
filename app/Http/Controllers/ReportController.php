@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\WorkPermitForm;
 use App\Models\Company;
-use App\Models\CompanyDepartment;
+use App\Models\Department;
 use App\Models\User;
 use App\Models\WorkPermitApproval;
 use Illuminate\Http\Request;
@@ -235,7 +235,7 @@ class ReportController extends Controller
             ->avg(DB::raw('DATEDIFF(area_manager_approved_at, created_at)'));
 
         // Departman performansı
-        $departmentStats = CompanyDepartment::where('company_id', $company->id)
+        $departmentStats = Department::where('company_id', $company->id)
             ->withCount([
                 'workPermits as total_permits',
                 'workPermits as completed_permits' => function ($q) {

@@ -6,7 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\WorkPermitForm;
 use App\Models\WorkPermitApproval;
-use App\Models\CompanyDepartment;
+use App\Models\Department;
+use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
 class DashboardController extends Controller
@@ -157,21 +158,44 @@ class DashboardController extends Controller
     /**
      * Çalışan Dashboard
      */
-    public function calisanDashboard()
+// app/Http/Controllers/DashboardController.php
+
+public function calisanDashboard()
+{
+    $user = Auth::user();
+
+    Log::info('🔍 Çalışan Dashboard Çağrıldı', [
+        'user_id' => $user->id,
+        'user_role' => $user->role,
+        'company_id' => $user->company_id
+    ]);
+
+    // Hata kontrolü
+    if (!$user->company_id) {
+        return redirect()->route('home')
+            ->with('error', 'Şirket bilginiz bulunamadı!');
+    }
+
+    $company = $user->company;
+    $stats = $this->getCalisanStats($user);
+    $myWorkPermits = $this->getMyWorkPermits($user);
+
+    Log::info('📊 Çalışan Dashboard Verileri', [
+        'stats' => $stats,
+        'work_permits_count' => $myWorkPermits->count()
+    ]);
+
+    return view('company.calisan', compact('stats', 'myWorkPermits', 'user'));
+}
+
+    public function firmaAdminiDashboard()
     {
-        $user = Auth::user();
+        $firma = auth()->user()->company;
+        $calisanlar = User::where('company_id', $firma->id)->count();
+        $aktifIzinler = WorkPermitForm::where('company_id', $firma->id)
+            ->where('status', 'approved')->count();
 
-        Log::info('👤 Çalışan Dashboard Çağrıldı', [
-            'user_id' => $user->id,
-            'user_name' => $user->name,
-            'user_role' => $user->role
-        ]);
-
-        $company = $user->company;
-        $stats = $this->getCalisanStats($user);
-        $myWorkPermits = $this->getMyWorkPermits($user);
-
-        return view('company.calisan', compact('stats', 'myWorkPermits', 'user'));
+        return view('firma.admin-dashboard', compact('firma', 'calisanlar', 'aktifIzinler'));
     }
 
     // ==================== PRIVATE METHODS ====================
